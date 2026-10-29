@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LÚMEN — A Cidade Sob a Maré</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#08111d;color:#e9e8dc;font-family:Georgia,serif}
+canvas{display:block}
+#hud{position:fixed;top:18px;left:22px;text-shadow:0 2px 8px #000;pointer-events:none}
+.kicker{font-size:10px;letter-spacing:4px;color:#91bdc6}
+h2{letter-spacing:4px;font-weight:normal}
+#task{max-width:330px;color:#bdd1d0;font-size:14px;line-height:1.5}
+.meter{height:5px;width:200px;background:#ffffff22;margin-top:7px}
+#charge{height:100%;width:100%;background:#e5c278}
+#stam{height:100%;width:100%;background:#78c8e6}
+#mode{margin-top:8px;font-size:12px;color:#e5c278}
+#tide{position:fixed;top:18px;left:50%;transform:translateX(-50%);color:#ff9d8f;letter-spacing:3px;font-size:14px;text-shadow:0 2px 8px #000;pointer-events:none;text-align:center}
+#map{position:fixed;right:18px;top:18px;width:150px;height:150px;background:#071824cc;border:1px solid #94bdc555}
+#hint{position:fixed;bottom:55px;width:100%;text-align:center;color:#ffe1a0;text-shadow:0 2px 8px #000;pointer-events:none}
+#controls{position:fixed;bottom:15px;width:100%;text-align:center;font-size:12px;color:#d1dadb;text-shadow:0 2px 8px #000;pointer-events:none}
+#toast{position:fixed;top:145px;left:50%;transform:translateX(-50%);width:max-content;max-width:85vw;background:#0c2434ee;border:1px solid #a1c6ca55;padding:14px 20px;text-align:center;line-height:1.5;opacity:0;transition:opacity .3s;pointer-events:none}
+.overlay{position:fixed;inset:0;background:#04101be8;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
+.box{width:min(760px,95vw);padding:25px;text-align:center}
+.box p{line-height:1.7;color:#c6d3d4}
+h1{font-size:clamp(45px,9vw,90px);letter-spacing:12px;font-weight:normal;margin:15px 0}
+button{font-family:Georgia,serif;cursor:pointer}
+.primary{border:1px solid #f1d99a;background:#ddc488;color:#101b28;padding:14px 25px;letter-spacing:3px;margin:10px 0}
+#dialog .box,#journal .box{background:#0b1a29f5;border:1px solid #8babb155;box-shadow:0 20px 100px #0008;text-align:left}
+#speaker{color:#e9ca87;letter-spacing:3px;font-size:13px}
+#speech{font-size:18px;line-height:1.7;white-space:pre-line}
+#choices{display:grid;gap:9px}
+.choice{text-align:left;border:1px solid #96bfc54d;background:#a9d0d00a;color:#e3e7dc;padding:12px;font-size:15px}
+.entry{border-left:2px solid #9dbfc0;padding:10px 15px;margin:15px 0;line-height:1.6;color:#c9d5d5}
+.hidden{display:none!important}
+#error{display:none;position:fixed;z-index:10;top:0;background:#9b1830;color:white;padding:12px}
+@media(max-width:650px){
+#map{width:95px;height:95px}
+#hud{left:12px;top:12px}
+#task{max-width:220px;font-size:12px}
+#controls{font-size:10px}
+#tide{top:70px;font-size:11px}
+.box{padding:12px}
+}
+</style>
+</head>
+<body>
+<div id="error"></div>
+<div id="hud">
+  <div class="kicker">A CIDADE SOB A MARÉ</div>
+  <h2>LÚMEN</h2>
+  <div id="task">Encontre a barqueira no mercado.</div>
+  <div class="meter"><div id="charge"></div></div>
+  <div class="meter"><div id="stam"></div></div>
+  <div id="mode"></div>
+</div>
+<div id="tide"></div>
+<canvas id="map" width="200" height="200"></canvas>
+<div id="toast"></div>
+<div id="hint"></div>
+<div id="controls">WASD / setas: mover · Shift: correr · F: revelar passado · E: interagir · J: diário · P: pausar</div>
+
+<div id="menu" class="overlay">
+  <div class="box">
+    <div class="kicker">CAPÍTULO I · A ÚLTIMA NOITE</div>
+    <h1>LÚMEN</h1>
+    <p>A cidade desaparecida voltou à superfície.<br>
+    Sua irmã Lia deixou uma carta em um hotel que afundou há vinte anos.<br>
+    Entre antes que a maré se lembre do caminho.</p>
+    <p id="loading">Preparando a cidade...</p>
+    <button class="primary" id="start" disabled>ENTRAR NA CIDADE</button>
+    <p>F revela o passado. A luz abre caminhos, mas também atrai os Afogados. Cuidado com a maré alta.</p>
+  </div>
+</div>
+
+<div id="dialog" class="overlay hidden">
+  <div class="box">
+    <div id="speaker"></div>
+    <p id="speech"></p>
+    <div id="choices"></div>
+  </div>
+</div>
+
+<div id="journal" class="overlay hidden">
+  <div class="box">
+    <h2>CADERNO DE MIRA</h2>
+    <div id="entries"></div>
+    <button class="primary" id="closeJournal">VOLTAR</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+window.onerror = message => {
+  $("error").style.display = "block";
+  $("error").textContent = "Erro: " + message;
+};
+
+if (typeof THREE === "undefined") {
+  $("loading").textContent = "Não foi possível carregar o 3D. Verifique sua internet.";
+} else {
+  createGame();
+}
+
+function createGame() {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x101f30);
+  scene.fog = new THREE.FogExp2(0x172e42, 0.009);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  document.body.prepend(renderer.domElement);
+
+  const camera = new THREE.PerspectiveCamera(48, innerWidth/innerHeight, .1, 300);
+  camera.position.set(0, 13, 28);
+
+  scene.add(new THREE.HemisphereLight(0xb4d3ec, 0x172330, 1.4));
+  const moon = new THREE.DirectionalLight(0xb1cdf7, 1.5);
+  moon.position.set(-25, 35, -25);
+  moon.castShadow = true;
+  moon.shadow.mapSize.set(1024,1024);
+  scene.add(moon);
+
+  const moonMesh = new THREE.Mesh(new THREE.SphereGeometry(3,24,16),
+    new THREE.MeshBasicMaterial({color:0xdbe7dc,fog:false}));
+  moonMesh.position.set(-30,35,-100);
+  scene.add(moonMesh);
+
+  // Céu estrelado
+  const sp = [];
+  for (let i=0;i<500;i++) {
+    const a=Math.random()*Math.PI*2, e=Math.random()*1.2+.15, r=180;
+    sp.push(Math.cos(a)*Math.cos(e)*r, Math.sin(e)*r, Math.sin(a)*Math.cos(e)*r);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute("position", new THREE.Float32BufferAttribute(sp,3));
+  scene.add(new THREE.Points(starGeo,
+    new THREE.PointsMaterial({color:0xffffff,size:2,sizeAttenuation:false,fog:false})));
+
+  const mat = (color, extra={}) =>
+    new THREE.MeshStandardMaterial(Object.assign({color,roughness:.85,flatShading:true},extra));
+
+  const stone=mat(0x536473), dark=mat(0x263c50);
+  const gold=mat(0xbca16c,{metalness:.4,roughness:.4});
+  const roof=mat(0x273e55), wood=mat(0x3a3541);
+  const glass=mat(0xffdc99,{emissive:0xffac49,emissiveIntensity:1.2});
+  const ghost=mat(0x68e6d5,{emissive:0x238f94,emissiveIntensity:.8,transparent:true,opacity:.65});
+
+  function mesh(geometry,material,x=0,y=0,z=0,parent=scene) {
+    const m=new THREE.Mesh(geometry,material);
+    m.position.set(x,y,z);
+    m.castShadow=true; m.receiveShadow=true;
+    parent.add(m);
+    return m;
+  }
+  function box(w,h,d,material,x,y,z,parent=scene) {
+    return mesh(new THREE.BoxGeometry(w,h,d),material,x,y,z,parent);
+  }
+  function cylinder(top,bottom,height,material,x,y,z,parent=scene,sides=12) {
+    return mesh(new THREE.CylinderGeometry(top,bottom,height,sides),material,x,y,z,parent);
+  }
+
+  // ---------- Letreiros ----------
+  function makeTex(text,w,h,fs) {
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const x=c.getContext("2d");
+    x.fillStyle="#0b1a29"; x.fillRect(0,0,w,h);
+    x.strokeStyle="#e5c278"; x.lineWidth=6; x.strokeRect(5,5,w-10,h-10);
+    let f=fs;
+    do { x.font="bold "+f+"px Georgia"; f-=2; } while(x.measureText(text).width>w-40&&f>14);
+    x.fillStyle="#f1d99a"; x.textAlign="center"; x.textBaseline="middle";
+    x.fillText(text,w/2,h/2+3);
+    const t=new THREE.CanvasTexture(c);
+    t.encoding=THREE.sRGBEncoding;
+    return t;
+  }
+  function sign(text,w,x,y,z,parent) {
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,w*.2),
+      new THREE.MeshBasicMaterial({map:makeTex(text,512,102,46),toneMapped:false}));
+    m.position.set(x,y,z);
+    parent.add(m);
+    return m;
+  }
+  function tag(text,x,y,z,s=7) {
+    const m=new THREE.Sprite(new THREE.SpriteMaterial({
+      map:makeTex(text,512,102,46),fog:false,toneMapped:false}));
+    m.scale.set(s,s*.2,1);
+    m.position.set(x,y,z);
+    scene.add(m);
+    return m;
+  }
+
+  const water=mesh(new THREE.PlaneGeometry(300,300),
+    mat(0x163d54,{metalness:.7,roughness:.25,flatShading:false}),0,-.6,0);
+  water.rotation.x=-Math.PI/2;
+  water.castShadow=false;
+
+  const obstacles=[];
+  function obstacle(x,z,hx,hz){ obstacles.push({x,z,hx,hz}); }
+
+  function path(x,z,w,d) {
+    box(w,.08,d,stone,x,.15,z);
+    for(let i=0;i<Math.floor(d/1.3);i++) box(w,.015,.035,dark,x,.20,z-d/2+i*1.3);
+  }
+
+  const plots=[[0,12,60,40],[0,-22,60,18],[0,-43,60,24],[0,-66,48,20],[-38,-26,22,36],[38,-26,22,36]];
+  plots.forEach(([x,z,w,d])=>box(w,1.1,d,dark,x,-.45,z));
+  plots.forEach(([x,z,w,d])=>box(w,.18,d,mat(0x374a53),x,.15,z));
+
+  path(0,12,4,40); path(0,0,44,4); path(0,-22,4,18); path(0,-43,4,24);
+  path(0,-66,4,20); path(-30,-24,20,4); path(30,-24,20,4);
+  path(-38,-40,4,15); path(38,-40,4,15);
+
+  function building(x,z,w,d,h,color,name) {
+    const group=new THREE.Group();
+    group.position.set(x,.3,z);
+    scene.add(group);
+    box(w,h,d,mat(color),0,h/2,0,group);
+    box(w+.4,.25,d+.4,stone,0,.1,0,group);
+    box(w+.3,.24,d+.3,dark,0,h*.53,0,group);
+    const top=mesh(new THREE.ConeGeometry(Math.max(w,d)*.77,2.6,4),roof,0,h+1.2,0,group);
+    top.rotation.y=Math.PI/4;
+    for(const side of [-1,1])
+      for(let i=0;i<3;i++)
+        box(.65,1.15,.07,glass,(i-1)*w*.25,h*.68,side*(d/2+.045),group);
+    box(1.25,2,.1,wood,0,1,d/2+.06,group);
+    sign(name,Math.min(w-.4,7.5),0,3.3,d/2+.2,group);
+    obstacle(x,z,w/2+.3,d/2+.3);
+    return group;
+  }
+
+  // Porto
+  building(-21,20,9,8,7,0x536673,"ARMAZÉM DO PORTO");
+  building(21,20,9,8,8,0x647178,"TAVERNA DO CAIS");
+  building(-22,5,8,9,9,0x4b6173,"CAPITANIA");
+  building(22,5,8,9,7,0x62767b,"OFICINA DOS BARCOS");
+  building(14,-3,9,6,9,0x67727b,"HOTEL DA MARÉ");
+  // Cidade antiga
+  building(-20,-38,9,8,10,0x536b78,"CATEDRAL SUBMERSA");
+  building(20,-38,8,7,8,0x4b6173,"ARQUIVO MUNICIPAL");
+  building(-38,-17,7,8,7,0x596875,"CASA DOS REFLEXOS");
+  building(38,-17,8,8,9,0x53677a,"TORRE DO SINO");
+  building(-17,-65,8,7,7,0x425967,"OSSUÁRIO");
+  building(17,-65,8,7,9,0x566975,"CAPELA DAS CRIPTAS");
+
+  // Mercado
+  for(let i=0;i<3;i++) {
+    const x=-14+i*4,z=9;
+    for(const side of [-1,1]) cylinder(.06,.06,2.6,wood,x+side*1.5,1.6,z);
+    box(3.7,.15,2.6,i%2?mat(0x49727c):mat(0x8f7068),x,2.95,z);
+    box(3.1,.8,1.2,wood,x,.7,z);
+    obstacle(x,z,1.7,.8);
+  }
+  tag("MERCADO",-10,4.8,9,5);
+
+  // Decoração: caixotes, barris, colunas, lápides
+  function crate(x,z){ box(1,1,1,wood,x,.7,z); obstacle(x,z,.55,.55); }
+  function barrel(x,z){ cylinder(.45,.45,1.1,wood,x,.75,z,scene,10); obstacle(x,z,.5,.5); }
+  [[-18,12],[-17,13],[-24,12],[18,12],[19,13],[26,13]].forEach(p=>crate(...p));
+  [[-8,12.5],[-9.5,13],[12,13],[14,12.5],[-27,2],[27,2]].forEach(p=>barrel(...p));
+  [[-28,-31,3.5],[-12,-31,2],[-28,-46,4],[12,-46,2.5],[28,-46,3]].forEach(([x,z,h])=>{
+    cylinder(.5,.6,h,stone,x,h/2+.2,z,scene,8); obstacle(x,z,.6,.6);
+  });
+  [[-8,-72],[8,-72],[-5,-74],[5,-75],[-22,-55],[22,-55]].forEach(([x,z],i)=>{
+    const t=box(.8,1.3,.25,stone,x,.8,z); t.rotation.z=(i%2?.12:-.1);
+  });
+
+  // Barcos e píeres
+  const boats=[];
+  function boat(x,z,r) {
+    const g=new THREE.Group();
+    g.position.set(x,-.2,z); g.rotation.y=r;
+    scene.add(g);
+    box(1.8,.7,5,wood,0,.3,0,g);
+    box(.1,4,.1,wood,0,2.5,0,g);
+    box(.05,2.6,1.8,mat(0xb9b09a),0,2.8,.2,g);
+    obstacle(x,z,1.1,2.6);
+    boats.push({g,p:Math.random()*6});
+  }
+  boat(-36,24,.3); boat(-40,8,-.2); boat(36,26,-.4); boat(41,10,.2);
+  box(8,.25,2.2,wood,-33,.2,22);
+  box(8,.25,2.2,wood,33,.2,24);
+
+  // Farol
+  cylinder(3.4,3.7,.5,stone,0,.5,-24);
+  cylinder(1.8,2.7,9,stone,0,5,-24);
+  cylinder(2.9,2.9,.35,gold,0,9.65,-24);
+  cylinder(2.1,2.1,2,dark,0,10.8,-24);
+  cylinder(0,3,2,roof,0,12.8,-24,scene,8);
+  obstacle(0,-24,2.4,2.4);
+  tag("FAROL DA ÚLTIMA NOITE",0,15.8,-24,10);
+
+  const beacon=new THREE.PointLight(0xffd18a,1.5,65,2);
+  beacon.position.set(0,10.8,-24);
+  scene.add(beacon);
+
+  const beamPivot=new THREE.Group();
+  beamPivot.position.set(0,10.8,-24);
+  scene.add(beamPivot);
+  const beam=box(2,1.4,34,new THREE.MeshBasicMaterial({
+    color:0xffe2a0,transparent:true,opacity:.13,depthWrite:false}),0,0,-17,beamPivot);
+  beam.castShadow=false;
+
+  // Memorial
+  box(2.2,.5,2.2,stone,-8,.5,-20);
+  box(1.1,4,.7,stone,-8,2.6,-20);
+  box(.8,.9,.1,gold,-8,2.8,-19.6);
+  obstacle(-8,-20,1.2,1.2);
+  tag("MEMORIAL",-8,5.6,-20,5);
+
+  // Entrada das criptas
+  box(5,.2,4,dark,0,.25,-60);
+  for(const s of [-1,1]) { box(.9,4,.9,stone,s*2.4,2.2,-60); obstacle(s*2.4,-60,.55,.55); }
+  box(5.8,.8,1,stone,0,4.4,-60);
+  tag("CRIPTAS DA GRANDE MARÉ",0,6.2,-60,8);
+
+  // Ponte que só existe no passado
+  const past=new THREE.Group();
+  scene.add(past);
+  past.visible=false;
+  box(4,.28,6,ghost,0,.22,-11,past);
+  for(const side of [-1,1]) box(.12,.12,6,gold,side*1.9,1.45,-11,past);
+  for(const z of [-7.8,-14.2]) box(4,.5,1.2,stone,0,.1,z);
+  tag("PONTE · revele com F",0,3.6,-11,6.5);
+
+  // Postes de recarga
+  const safePoints=[{x:0,z:19},{x:-16,z:2},{x:7,z:-19},{x:-27,z:-36},{x:27,z:-36},{x:0,z:-61}];
+  safePoints.forEach(p=>{
+    cylinder(.08,.12,3.6,dark,p.x,2,p.z);
+    box(.45,.6,.45,gold,p.x,3.9,p.z);
+    const light=new THREE.PointLight(0xffcf8b,1.2,10,2);
+    light.position.set(p.x,3.8,p.z);
+    scene.add(light);
+  });
+  let lastSafe=safePoints[0];
+
+  // Brasas das criptas (puzzle)
+  const brazierData=[{n:"LUA",x:10,z:-55},{n:"MARÉ",x:0,z:-71},{n:"ESTRELA",x:-10,z:-55}];
+  const braziers=brazierData.map(b=>{
+    cylinder(.5,.35,1,dark,b.x,.8,b.z);
+    const f=mesh(new THREE.ConeGeometry(.35,.9,8),
+      mat(0x442211,{emissive:0xff7a2e,emissiveIntensity:0}),b.x,1.7,b.z);
+    const l=new THREE.PointLight(0xff9a4a,0,9,2);
+    l.position.set(b.x,2.2,b.z);
+    scene.add(l);
+    tag(b.n,b.x,3.6,b.z,3.6);
+    obstacle(b.x,b.z,.6,.6);
+    return {f,l,lit:false};
+  });
+
+  // Orbes flutuantes
+  const orbs=[];
+  const orbMat=new THREE.MeshBasicMaterial({color:0x8ff0e4,transparent:true,opacity:.8});
+  for(let i=0;i<30;i++) {
+    const o=mesh(new THREE.SphereGeometry(.12,8,6),orbMat,
+      (Math.random()-.5)*90,2+Math.random()*4,12-Math.random()*80);
+    o.castShadow=false;
+    o.userData.b=o.position.y; o.userData.p=Math.random()*6;
+    orbs.push(o);
+  }
+
+  // Figuras fantasmas (só no passado)
+  const ghosts=new THREE.Group();
+  scene.add(ghosts);
+  ghosts.visible=false;
+  [[-6,14],[4,17],[-24,-24],[24,-24],[-5,-40],[6,-44],[-37,-30],[3,-63],[-16,10]].forEach(([x,z])=>{
+    const g=new THREE.Group();
+    g.position.set(x,.4,z);
+    ghosts.add(g);
+    mesh(new THREE.ConeGeometry(.4,1.7,8),ghost,0,.9,0,g);
+    mesh(new THREE.SphereGeometry(.28,10,8),ghost,0,1.95,0,g);
+  });
+
+  // Conchas de eco (colecionáveis, só no passado)
+  const shellPos=[[-30,-24],[30,-24],[-5,14],[26,12],[-38,-42],[38,-42],[-10,-70],[10,-48]];
+  const shellMat=mat(0x8ff6ee,{emissive:0x38d8c8,emissiveIntensity:1.4});
+  const shells=shellPos.map(([x,z])=>{
+    const m=mesh(new THREE.OctahedronGeometry(.32),shellMat,x,1.1,z);
+    m.visible=false;
+    return {m,x,z,taken:false};
+  });
+
+  // ---------- Personagens ----------
+  function person(x,z,color) {
+    const g=new THREE.Group();
+    g.position.set(x,.35,z);
+    scene.add(g);
+    cylinder(.25,.5,1.2,mat(color),0,.95,0,g,8);
+    mesh(new THREE.SphereGeometry(.25,10,8),mat(0xd9bfa3),0,1.8,0,g);
+    mesh(new THREE.SphereGeometry(.32,10,8),mat(color),0,1.87,.12,g);
+    return g;
+  }
+  const boatwoman=person(-12,4,0x7b7475);
+  const hat=mesh(new THREE.ConeGeometry(.5,.5,10),mat(0x4a4338),0,2.25,0,boatwoman);
+  cylinder(.05,.05,3,wood,.7,1.5,0,boatwoman,6);
+  tag("BARQUEIRA",-12,4.1,4,3.8);
+
+    // ===== BAIRRO DAS JANELAS (distrito leste) =====
+  box(34,1.1,28,dark,76,-.45,-30);
+  box(34,.18,28,mat(0x374a53),76,.15,-30);
+  path(76,-24,34,6);
+  path(76,-32,4,10);
+
+  // Ponte leste (sempre existe, não precisa de F)
+  const plank=mat(0x6b5440);
+  box(10.4,.3,4,plank,54,.2,-24);
+  for(const s of [-1,1]) {
+    box(10,.12,.12,plank,54,1.3,-24+s*1.9);
+    for(let i=0;i<5;i++) {
+      const px=49.6+i*2.2;
+      box(.15,1.2,.15,plank,px,.9,-24+s*1.9);
+      if(i===0||i===4) box(.25,.3,.25,glass,px,1.65,-24+s*1.9);
+    }
+    obstacle(54,-24+s*2,5,.1);
+  }
+  tag("PONTE DAS JANELAS",54,3.6,-24,7);
+
+  // Portal de entrada do bairro
+  for(const s of [-1,1]) {
+    box(.5,4.5,.5,stone,60,2.3,-24+s*3.3);
+    obstacle(60,-24+s*3.3,.4,.4);
+  }
+  box(.6,.6,7.1,stone,60,4.7,-24);
+  tag("BAIRRO DAS JANELAS",60,6.8,-24,10);
+
+  // Comércio e casas
+  const bd=(x,z,w,d,h,c,n,flip)=>{
+    const g=building(x,z,w,d,h,c,n);
+    if(flip) g.rotation.y=Math.PI;
+    return g;
+  };
+  // fileira sul (portas voltadas para a rua)
+  bd(64,-31,6,6,5,0x6a5f5a,"PADARIA");
+  bd(71,-31,5,6,5,0x536b78,"COSTUREIRA");
+  bd(82,-31,5,6,6,0x62767b,"PEIXARIA");
+  bd(89,-31,5,6,5,0x6a6270,"EMPÓRIO");
+  // fileira norte (viradas para a rua)
+  bd(64,-19,6,5,5,0x5b6c7a,"LOJA DE VELAS",true);
+  bd(71.5,-19,6,5,6,0x4b6173,"CASA DO PESCADOR",true);
+  bd(79.5,-19,7,5,7,0x647178,"ESTALAGEM",true);
+  bd(87.5,-19,6,5,5,0x536673,"FERREIRO",true);
+  // prédio principal no fim da rua
+  bd(76,-41,10,6,9,0x53677a,"CASA DAS JANELAS");
+
+  // Praça com fonte
+  cylinder(1.2,1.3,.6,stone,76,.6,-24);
+  cylinder(1,1,.08,mat(0x3a8aa0,{emissive:0x1a5a70,emissiveIntensity:.6}),76,.95,-24);
+  cylinder(.18,.25,1.4,stone,76,1.4,-24);
+  obstacle(76,-24,1.1,1.1);
+  tag("PRAÇA DAS JANELAS",76,4.2,-24,6);
+
+  // Postes de recarga do bairro
+  [{x:68,z:-24},{x:86,z:-24}].forEach(p=>{
+    safePoints.push(p);
+    cylinder(.08,.12,3.6,dark,p.x,2,p.z);
+    box(.45,.6,.45,gold,p.x,3.9,p.z);
+    const l=new THREE.PointLight(0xffcf8b,1.2,10,2);
+    l.position.set(p.x,3.8,p.z);
+    scene.add(l);
+  });
+
+  // Caixotes, barris e árvores
+  crate(61,-35); crate(61,-36); barrel(62.5,-35.5); barrel(91.5,-35);
+  [[62,-40],[67,-41],[86,-40],[91,-41]].forEach(([x,z])=>{
+    cylinder(.2,.3,2,wood,x,1.2,z,scene,6);
+    mesh(new THREE.IcosahedronGeometry(1.4,0),mat(0x2f5a4a),x,3.2,z);
+    obstacle(x,z,.4,.4);
+  });
+
+  // Moradores
+  person(66,-26.6,0x9a6a50);
+  person(84.5,-26.6,0x4a6a80);
+  person(80,-22.4,0x7a5a7a);
+
+  // Animais
+  const animals=[];
+  function animal(kind,x,z,r) {
+    const cfg={
+      chicken:{c:0xf2efe6,s:.5,sp:.9},
+      cat:{c:0x77777f,s:.6,sp:1.3},
+      dog:{c:0x8a5a38,s:1,sp:1.8},
+      goat:{c:0xe4dccb,s:1.15,sp:.8}
+    }[kind];
+    const g=new THREE.Group();
+    g.position.set(x,.3,z);
+    g.scale.setScalar(cfg.s);
+    scene.add(g);
+    const m=mat(cfg.c);
+    box(.5,.5,1,m,0,.65,0,g);
+    box(.36,.36,.4,m,0,.95,.6,g);
+    for(const sx of [-1,1]) for(const sz of [-1,1]) box(.12,.4,.12,m,sx*.18,.2,sz*.35,g);
+    if(kind==="chicken") {
+      box(.06,.14,.2,mat(0xd23b3b),0,1.2,.6,g);
+      box(.1,.08,.15,mat(0xe8a43a),0,.92,.85,g);
+    } else {
+      const tail=box(.06,.06,.5,m,0,.85,-.7,g);
+      tail.rotation.x=.6;
+      for(const s of [-1,1]) box(.08,.14,.08,m,s*.12,1.2,.55,g);
+    }
+    if(kind==="goat") for(const s of [-1,1]) box(.05,.25,.05,mat(0x555048),s*.1,1.3,.5,g);
+    animals.push({g,cx:x,cz:z,r,tx:x,tz:z,wait:Math.random()*2,sp:cfg.sp});
+  }
+  animal("chicken",65,-25,1.8); animal("chicken",67,-24.5,1.8); animal("chicken",64,-26,1.5);
+  animal("cat",84,-22.6,1); animal("cat",72,-26.5,1);
+  animal("dog",81,-24.5,2.5);
+  animal("goat",88,-37,2); animal("goat",66,-37,2);
+
+  let aLast=performance.now();
+  requestAnimationFrame(function animLoop(now) {
+    requestAnimationFrame(animLoop);
+    const dt=Math.min((now-aLast)/1000,.05);
+    aLast=now;
+    if(state.paused) return;
+    animals.forEach(a=>{
+      const dx=a.tx-a.g.position.x, dz=a.tz-a.g.position.z, d=Math.hypot(dx,dz);
+      if(a.wait>0){ a.wait-=dt; a.g.position.y=.3; return; }
+      if(d<.2) {
+        a.wait=1+Math.random()*3;
+        const ang=Math.random()*6.28, rr=Math.random()*a.r;
+        a.tx=a.cx+Math.cos(ang)*rr;
+        a.tz=a.cz+Math.sin(ang)*rr;
+        return;
+      }
+      a.g.position.x+=dx/d*a.sp*dt;
+      a.g.position.z+=dz/d*a.sp*dt;
+      a.g.rotation.y=Math.atan2(dx,dz);
+      a.g.position.y=.3+Math.abs(Math.sin(now*.012*a.sp))*.08;
+    });
+  });
+  // ===== fim do bairro =====
+
+  // Mira, a protagonista
+  const player=new THREE.Group();
+  player.position.set(0,.35,22);
+  scene.add(player);
+  const coat=mat(0x2f6f7e), skin=mat(0xe0bfa0), hairM=mat(0x3b2418);
+  const ribbon=mat(0x3d8bff,{emissive:0x1a4aa0,emissiveIntensity:.5});
+  const bootM=mat(0x2a2024);
+
+  const cape=mesh(new THREE.ConeGeometry(.6,1.5,8),mat(0x1d405f),0,1,.2,player);
+  cape.rotation.x=-.15;
+  cylinder(.3,.52,1.15,coat,0,1,0,player,10);
+  cylinder(.53,.53,.12,gold,0,.75,0,player,10);
+  mesh(new THREE.SphereGeometry(.26,12,10),skin,0,1.82,0,player);
+  mesh(new THREE.SphereGeometry(.31,12,10),hairM,0,1.9,.1,player);
+  const pony=mesh(new THREE.ConeGeometry(.12,.6,6),hairM,0,1.6,.38,player);
+  pony.rotation.x=-.5;
+  const rib=mesh(new THREE.TorusGeometry(.27,.06,6,12),ribbon,0,1.56,0,player);
+  rib.rotation.x=Math.PI/2;
+  for(const s of [-1,1]) mesh(new THREE.SphereGeometry(.035,6,6),dark,s*.09,1.85,-.23,player);
+  box(.45,.5,.2,wood,0,.95,.42,player);
+
+  const arms=[];
+  for(const s of [-1,1]) {
+    const a=new THREE.Group();
+    a.position.set(s*.4,1.45,0);
+    player.add(a);
+    box(.15,.6,.15,coat,0,-.28,0,a);
+    mesh(new THREE.SphereGeometry(.09,8,6),skin,0,-.62,0,a);
+    arms.push(a);
+  }
+  arms[1].rotation.x=.9;
+
+  const legs=[];
+  for(const s of [-1,1]) {
+    const l=new THREE.Group();
+    l.position.set(s*.17,.5,0);
+    player.add(l);
+    box(.17,.45,.2,dark,0,-.22,0,l);
+    box(.2,.14,.32,bootM,0,-.45,-.04,l);
+    legs.push(l);
+  }
+
+  // Lanterna na mão
+  const lantern=new THREE.Group();
+  lantern.position.set(.45,.92,-.5);
+  player.add(lantern);
+  const lampMat=new THREE.MeshBasicMaterial({color:0xffd49c});
+  mesh(new THREE.SphereGeometry(.12,8,8),lampMat,0,0,0,lantern);
+  box(.26,.05,.26,gold,0,.17,0,lantern);
+  box(.26,.05,.26,gold,0,-.17,0,lantern);
+
+  const playerLight=new THREE.PointLight(0xffd49c,2.2,10,2);
+  playerLight.position.set(.45,1,-.5);
+  player.add(playerLight);
+
+  // Afogados (três regiões)
+  function makeEnemy(x,z,col,sc,zone,s1,s2,n1,n2,ph) {
+    const g=new THREE.Group();
+    g.position.set(x,.3,z);
+    g.scale.setScalar(sc);
+    scene.add(g);
+    const m=mat(col);
+    mesh(new THREE.ConeGeometry(.65,2.8,9),m,0,1.4,0,g);
+    mesh(new THREE.SphereGeometry(.38,10,8),m,0,2.8,0,g);
+    const eye=new THREE.MeshBasicMaterial({color:0x8ff6ee});
+    for(const s of [-1,1]) {
+      mesh(new THREE.SphereGeometry(.07,6,6),eye,s*.14,2.85,-.33,g);
+      const a=box(.12,1.4,.12,m,s*.62,1.7,-.1,g);
+      a.rotation.z=s*.5;
+    }
+    const l=new THREE.PointLight(0x4fe0d0,.8,7,2);
+    l.position.set(0,2.5,0);
+    g.add(l);
+    return {g,home:{x,z},zone,s1,s2,n1,n2,sc,ph};
+  }
+  const enemies=[
+    makeEnemy(9,11,0x0d1726,1,{x0:-24,x1:24,z0:-5,z1:26},1.7,2.9,6,21,0),
+    makeEnemy(0,-38,0x1a1030,1.15,{x0:-46,x1:46,z0:-48,z1:-26},2,3.2,7,22,2),
+    makeEnemy(-12,-62,0x2a0f1a,1.3,{x0:-24,x1:24,z0:-77,z1:-52},2.3,3.5,8,24,4)
+  ];
+
+  // ---------- Estado ----------
+  const state={
+    started:false,paused:false,ended:false,reveal:false,charge:100,stamina:100,tired:false,
+    spoke:false,code:false,letter:false,truth:false,rescued:false,
+    cathedral:false,archive:false,windows:false,crypt:false,catches:0,
+    shells:0,braziers:0
+  };
+  const tide={t:40,warn:0};
+
+  const journal=[{
+    title:"A carta",
+    text:"Lia escreveu: “Se a cidade voltar, procure meu quarto no Hotel da Maré. Não siga a luz que anda sozinha.”"
+  }];
+
+  const keys={};
+  const velocity=new THREE.Vector3();
+  const desired=new THREE.Vector3();
+  const cameraTarget=new THREE.Vector3();
+  let dialogOpen=false,journalOpen=false,near=null;
+  let time=0,last=performance.now(),hitCooldown=0,blockHint="";
+  let currentChoices=[];
+
+  function notify(text,duration=4500) {
+    $("toast").textContent=text;
+    $("toast").style.opacity=1;
+    clearTimeout(notify.timer);
+    notify.timer=setTimeout(()=>$("toast").style.opacity=0,duration);
+  }
+
+  function entry(title,text) {
+    if(journal.some(e=>e.title===title))return;
+    journal.push({title,text});
+  }
+
+  function dialogue(speaker,text,options) {
+    dialogOpen=true;
+    currentChoices=options;
+    $("speaker").textContent=speaker.toUpperCase();
+    $("speech").textContent=text;
+    $("choices").innerHTML="";
+    options.forEach((option,index)=>{
+      const button=document.createElement("button");
+      button.className="choice";
+      button.textContent=(index+1)+". "+option.label;
+      button.onclick=()=>{ closeDialogue(); option.action(); };
+      $("choices").appendChild(button);
+    });
+    $("dialog").classList.remove("hidden");
+  }
+
+  function closeDialogue() {
+    dialogOpen=false;
+    currentChoices=[];
+    $("dialog").classList.add("hidden");
+  }
+
+  function openJournal() {
+    if(!state.started||state.ended||dialogOpen)return;
+    journalOpen=!journalOpen;
+    $("journal").classList.toggle("hidden",!journalOpen);
+    $("entries").innerHTML="";
+    journal.forEach(e=>{
+      const div=document.createElement("div");
+      div.className="entry";
+      const title=document.createElement("h3");
+      title.textContent=e.title;
+      const p=document.createElement("p");
+      p.textContent=e.text;
+      div.append(title,p);
+      $("entries").append(div);
+    });
+  }
+
+  $("closeJournal").onclick=()=>{
+    journalOpen=false;
+    $("journal").classList.add("hidden");
+  };
+
+  function objective() {
+    if(!state.spoke)return "Fale com a barqueira no mercado, a oeste.";
+    if(!state.code)return "Revele o passado no mercado e encontre uma pista.";
+    if(!state.letter)return "Vá ao Hotel da Maré e investigue o quarto 307.";
+    if(!state.truth)return "Atravesse a ponte com F e examine o memorial.";
+    if(!state.cathedral)return "Explore a Catedral Submersa e revele a memória dos vitrais.";
+    if(!state.archive)return "Investigue o Arquivo Municipal e encontre os registros.";
+    if(!state.windows)return "Cruze a ponte a leste até o Bairro das Janelas e examine a Casa das Janelas.";
+    if(state.braziers<3)return "Nas criptas, acenda as 3 brasas na ordem revelada pelos reflexos.";
+    if(!state.crypt)return "Desça às Criptas da Grande Maré.";
+    if(state.shells<6)return "Reúna 6 conchas de eco no passado (" + state.shells + "/8).";
+    return "Volte ao farol e escolha o destino da cidade.";
+  }
+
+  function toggleLantern() {
+    if(!state.started||state.ended||state.paused||dialogOpen||journalOpen)return;
+    const inCanal=player.position.z < -8 && player.position.z > -14;
+    if(state.reveal&&inCanal) {
+      notify("Não apague a lembrança enquanto estiver sobre a ponte.");
+      return;
+    }
+    if(!state.reveal&&state.charge<10) {
+      notify("Aproxime-se de um poste dourado para recarregar.");
+      return;
+    }
+    state.reveal=!state.reveal;
+    notify(state.reveal?
+      "O passado responde à luz. Caminhos, conchas e pessoas esquecidas reaparecem.":
+      "Você volta ao presente. Os Afogados deixam de enxergar sua luz à distância.");
+  }
+
+  function finish(type) {
+    state.ended=true;
+    state.reveal=false;
+    const endings={
+      release:{
+        title:"AMANHECER",
+        text:state.rescued?
+        "Você acende o farol e liberta a cidade. A barqueira conduz os últimos ecos para o mar. Lia não retorna, mas sua voz finalmente termina a frase: “Você pode ir.”":
+        "Você acende o farol. As janelas se apagam uma a uma. Lia deixa de esperar no quarto, e você deixa de esperar no porto."
+      },
+      stay:{
+        title:"A VIGÍLIA",
+        text:"Você mantém a cidade acordada. O hotel volta a receber hóspedes, e Lia abre a janela do quarto. Amanhã, ela não lembrará da sua visita."
+      },
+      break:{
+        title:"MARÉ LIVRE",
+        text:"Você rompe a lente do farol. Os ecos escolhem seus próprios caminhos. No oceano, centenas de luzes se afastam. Uma delas pisca duas vezes, como Lia fazia."
+      }
+    };
+    $("menu").classList.remove("hidden");
+    $("menu").querySelector(".kicker").textContent="FIM DO CAPÍTULO";
+    $("menu").querySelector("h1").textContent=endings[type].title;
+    $("menu").querySelector("p").textContent=endings[type].text;
+    $("loading").textContent="Registros: "+journal.length+" · Conchas: "+state.shells+"/8 · Capturas: "+state.catches;
+    $("start").textContent="JOGAR NOVAMENTE";
+    $("start").onclick=()=>location.reload();
+    $("hint").textContent="";
+  }
+
+  function interact() {
+    if(!state.started||state.paused||state.ended||dialogOpen||journalOpen||!near)return;
+
+    if(near==="barqueira") {
+      state.spoke=true;
+      entry("A barqueira","A cidade repete sua última noite. No mercado antigo, um vendedor conhece o quarto de Lia.");
+      dialogue("A barqueira",
+        "“Sua irmã chegou antes de você. Todos chegam antes de alguém.”\n\n“Acenda sua luz. Os vendedores de ontem ainda conhecem os hóspedes do hotel. E cuidado: quando a maré sobe, só os postes dourados protegem.”",
+        [
+          {label:"Prometer ajudar a barqueira",action:()=>{
+            state.rescued=true;
+            entry("Uma promessa","Você prometeu abrir um caminho para a barqueira quando chegasse ao farol.");
+            notify("A barqueira entrega sua confiança, não um objeto.");
+          }},
+          {label:"Seguir para o mercado",action:()=>{}}
+        ]);
+    }
+
+    if(near==="mercado") {
+      if(!state.reveal) { notify("As bancas estão vazias. Pressione F para revelar a última noite."); return; }
+      state.code=true;
+      entry("O hóspede do quarto 307","O vendedor recorda Lia no quarto 307. A frase para abrir a lembrança é: “O mar devolve os nomes”.");
+      dialogue("O vendedor de ontem",
+        "“A moça da fita azul? Quarto 307. Ela pagou com uma concha.”\n\n“O mar devolve os nomes. Diga isso ao porteiro.”",
+        [{label:"Guardar a frase",action:()=>notify("Agora investigue o Hotel da Maré.")}]);
+    }
+
+    if(near==="hotel") {
+      if(!state.code) { notify("Você precisa descobrir no mercado quem ocupou o quarto 307."); return; }
+      dialogue("Hotel da Maré",
+        "No corredor da lembrança, o quarto 307 está aberto. Sobre a cama, há uma carta seca num prédio cheio de água.",
+        [{label:"Ler a carta de Lia",action:()=>{
+          state.letter=true;
+          entry("A carta do quarto 307","Mira, não fui eu quem fez a cidade voltar. Foi o farol. Procure o memorial além da ponte.");
+          dialogue("Carta de Lia",
+            "“O farol não salva barcos. Guarda despedidas que ninguém conseguiu dizer. Procure meu nome no memorial.”",
+            [{label:"Guardar a carta",action:()=>notify("Atravesse a ponte com a lanterna revelando o passado.")}]);
+        }}]);
+    }
+
+    if(near==="memorial") {
+      if(!state.letter) { notify("Falta uma pista sobre quem procurar."); return; }
+      if(!state.reveal) { notify("A placa está corroída. Revele seu passado com F."); return; }
+      state.truth=true;
+      entry("O memorial da Grande Maré","Lia morreu na Grande Maré. O farol reteve a última noite para que os habitantes não precisassem se despedir.");
+      dialogue("Memorial",
+        "LIA — GRANDE MARÉ, HÁ VINTE ANOS.\n\n“Que nenhuma luz transforme o amor em prisão.”\n\nO farol não devolveu Lia: impediu que sua última noite terminasse.",
+        [{label:"Continuar a investigação",action:()=>notify("Novos destinos: catedral, arquivo, bairro das janelas e criptas. Procure também as conchas de eco.")}]);
+    }
+
+    if(near==="cathedral") {
+      if(!state.truth){notify("Investigue o memorial antes de explorar os vitrais.");return;}
+      if(!state.reveal){notify("Pressione F para revelar a memória dos vitrais.");return;}
+      state.cathedral=true;
+      entry("Os vitrais partidos","A catedral mostra a cidade antes da Grande Maré. A lente do farol foi alimentada pelas últimas lembranças dos habitantes.");
+      dialogue("Catedral Submersa",
+        "Os vitrais recompõem uma procissão interrompida. Uma figura aponta para o Arquivo Municipal. Cuidado: o Sentinela patrulha esta região.",
+        [{label:"Ir ao arquivo",action:()=>notify("Novo destino: Arquivo Municipal, a leste.")}]);
+    }
+
+    if(near==="archive") {
+      if(!state.cathedral){notify("Descubra primeiro o segredo dos vitrais na catedral.");return;}
+      if(!state.reveal){notify("Revele o passado para ler os registros apagados.");return;}
+      state.archive=true;
+      entry("O registro da maré","A lente repetiu a última noite para impedir que as memórias se apagassem. O primeiro guardião ofereceu a própria memória.");
+      dialogue("Arquivo Municipal",
+        "O Afogado nasceu do que restou do primeiro guardião. Os registros indicam que uma figura aparece nos vidros do bairro antigo.",
+        [{label:"Investigar os reflexos",action:()=>notify("Novo destino: Bairro das Janelas.")}]);
+    }
+
+    if(near==="windows") {
+      if(!state.archive){notify("Você precisa dos registros do arquivo para entender os reflexos.");return;}
+      if(!state.reveal){notify("Pressione F e observe as janelas antigas.");return;}
+      state.windows=true;
+      entry("A testemunha no vidro","Uma figura aparece em todas as janelas, sempre um passo atrás de Mira. Ela aponta para o chão e mostra três chamas: primeiro a Lua, depois a Maré, por fim a Estrela.");
+      dialogue("Bairro das Janelas",
+        "Os reflexos se movem antes de você. A figura aponta para o chão e ergue três dedos. Uma voz sopra: “Primeiro a Lua, depois a Maré, por fim a Estrela.”",
+        [{label:"Ir às criptas",action:()=>notify("Acenda as três brasas das criptas na ordem correta.")}]);
+    }
+
+    const bi=/^b(\d)$/.exec(near);
+    if(bi) {
+      if(!state.windows){notify("Você ainda não sabe em que ordem acender as brasas.");return;}
+      const i=Number(bi[1]);
+      if(braziers[i].lit){notify("Esta brasa já arde.");return;}
+      if(i===state.braziers) {
+        braziers[i].lit=true;
+        state.braziers++;
+        notify(state.braziers===3?
+          "As três brasas acendem. A escadaria das criptas se abre.":
+          "A brasa acende. Faltam "+(3-state.braziers)+".");
+      } else {
+        state.braziers=0;
+        braziers.forEach(b=>b.lit=false);
+        state.charge=Math.max(0,state.charge-15); 
+        notify("Ordem errada! As brasas se apagam e levam parte da sua chama.");
+      }
+    }
+
+    if(near==="crypt") {
+      if(!state.windows){notify("Siga a pista encontrada nos reflexos antes de descer.");return;}
+      if(state.braziers<3){notify("A escadaria está selada. Acenda as três brasas na ordem dos reflexos.");return;}
+      if(!state.reveal){notify("A escadaria só permanece no passado. Pressione F.");return;}
+      state.crypt=true;
+      entry("A origem da lanterna","A lanterna guarda a lembrança de Lia, que tentou libertar os habitantes. O Afogado é o guardião que se esqueceu de como partir.");
+      dialogue("Criptas da Grande Maré",
+        "A lente pode libertar o guardião, aprisioná-lo ou quebrar o ciclo. Falta reunir as conchas de eco para ativá-la.",
+        [{label:"Levar a verdade ao farol",action:()=>notify("Reúna 6 conchas de eco e volte ao Farol da Última Noite.")}]);
+    }
+
+    if(near==="farol") {
+      if(!state.truth){notify("Procure a verdade no memorial antes de entrar no farol.");return;}
+      if(!state.cathedral||!state.archive||!state.windows||!state.crypt) {
+        notify("A lente continua incompleta. Explore a catedral, o arquivo, o bairro das janelas e as criptas.");
+        return;
+      }
+      if(state.shells<6) {
+        notify("A lente precisa de 6 conchas de eco ("+state.shells+"/8). Procure-as no passado (F).");
+        return;
+      }
+      dialogue("A lente do farol",
+        "Três caminhos aparecem na superfície do vidro.\n\nVocê pode terminar a noite, mantê-la acesa ou devolver a escolha aos ecos.",
+        [
+          {label:"Acender o último amanhecer e libertar a cidade",action:()=>finish("release")},
+          {label:"Manter a noite para visitar Lia novamente",action:()=>finish("stay")},
+          {label:"Romper a lente: ninguém pertence ao farol",action:()=>finish("break")}
+        ]);
+    }
+
+    if(near==="lamp") {
+      state.charge=100;
+      notify("A chama do poste reabastece sua lanterna.");
+    }
+  }
+
+  const locations=[
+    {id:"barqueira",x:-12,z:4,label:"E · FALAR COM A BARQUEIRA",r:2.8},
+    {id:"mercado",x:-9,z:6,label:"E · EXAMINAR O MERCADO",r:3},
+    {id:"hotel",x:14,z:1.3,label:"E · ENTRAR NO HOTEL",r:3},
+    {id:"memorial",x:-8,z:-18.3,label:"E · LER O MEMORIAL",r:3},
+    {id:"cathedral",x:-20,z:-32,label:"E · EXPLORAR A CATEDRAL",r:4},
+    {id:"archive",x:20,z:-32,label:"E · INVESTIGAR O ARQUIVO",r:4},
+   {id:"windows",x:76,z:-36.2,label:"E · OBSERVAR OS REFLEXOS",r:4},
+    {id:"crypt",x:0,z:-57,label:"E · DESCER ÀS CRIPTAS",r:3},
+    {id:"farol",x:0,z:-20,label:"E · SUBIR AO FAROL",r:3},
+    {id:"b0",x:10,z:-55,label:"E · ACENDER A BRASA DA LUA",r:2.6},
+    {id:"b1",x:0,z:-71,label:"E · ACENDER A BRASA DA MARÉ",r:2.6},
+    {id:"b2",x:-10,z:-55,label:"E · ACENDER A BRASA DA ESTRELA",r:2.6}
+  ];
+
+  function findInteraction() {
+    near=null;
+    let distance=Infinity;
+    for(const loc of locations) {
+      const d=Math.hypot(player.position.x-loc.x,player.position.z-loc.z);
+      if(d<loc.r&&d<distance) { near=loc.id; distance=d; $("hint").textContent=loc.label; }
+    }
+    for(const p of safePoints) {
+      const d=Math.hypot(player.position.x-p.x,player.position.z-p.z);
+      if(d<2&&d<distance) { near="lamp"; distance=d; $("hint").textContent="E · RECARREGAR LANTERNA"; }
+    }
+    if(!near)$("hint").textContent=blockHint;
+  }
+
+  function catchPlayer() {
+    state.catches++;
+    state.charge=Math.max(20,state.charge-25);
+    state.reveal=false;
+    player.position.set(lastSafe.x,.35,lastSafe.z+1.2);
+    enemies.forEach(e=>e.g.position.set(e.home.x,.3,e.home.z));
+    velocity.set(0,0,0);
+    hitCooldown=5;
+    notify("Um Afogado roubou parte da chama. Você desperta junto ao último poste. Suas pistas foram preservadas.");
+  }
+
+  function update(dt) {
+    time+=dt;
+    hitCooldown=Math.max(0,hitCooldown-dt);
+    blockHint="";
+
+    const ix=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);
+    const iz=(keys.KeyS||keys.ArrowDown?1:0)-(keys.KeyW||keys.ArrowUp?1:0);
+
+    desired.set(ix,0,iz);
+    const moving=desired.lengthSq()>0;
+    let spd=4.4;
+    if(moving&&(keys.ShiftLeft||keys.ShiftRight)&&!state.tired&&state.stamina>0) {
+      spd=7;
+      state.stamina-=24*dt;
+      if(state.stamina<=0){ state.stamina=0; state.tired=true; notify("Sem fôlego!",1200); }
+    } else {
+      state.stamina=Math.min(100,state.stamina+16*dt);
+      if(state.tired&&state.stamina>35)state.tired=false;
+    }
+    if(state.tired)spd=3.4;
+    if(moving)desired.normalize().multiplyScalar(spd);
+    velocity.lerp(desired,1-Math.exp(-10*dt));
+
+    let nx=player.position.x+velocity.x*dt;
+    let nz=player.position.z+velocity.z*dt;
+   nx=THREE.MathUtils.clamp(nx,-49,97);
+    nz=THREE.MathUtils.clamp(nz,-78,30);
+
+    const canal=nz < -8 && nz > -14;
+    if(canal&&(!state.reveal||Math.abs(nx)>1.65)) {
+      nx=player.position.x;
+      nz=player.position.z;
+      if(iz<0&&player.position.z>-8) blockHint="F · REVELE A PONTE PARA ATRAVESSAR";
+    }
+
+    for(const o of obstacles) {
+      if(Math.abs(nx-o.x)<o.hx+.35&&Math.abs(nz-o.z)<o.hz+.35) {
+        const oldX=player.position.x,oldZ=player.position.z;
+        if(Math.abs(oldX-o.x)>=o.hx+.35)nx=oldX;
+        else if(Math.abs(oldZ-o.z)>=o.hz+.35)nz=oldZ;
+        else {nx=oldX;nz=oldZ;}
+      }
+    }
+
+    player.position.x=nx;
+    player.position.z=nz;
+
+    if(velocity.lengthSq()>.1) {
+      const angle=Math.atan2(-velocity.x,-velocity.z);
+      const diff=Math.atan2(Math.sin(angle-player.rotation.y),Math.cos(angle-player.rotation.y));
+      player.rotation.y+=diff*(1-Math.exp(-12*dt));
+    }
+
+    const walking=velocity.length()>.3;
+    legs.forEach((leg,i)=>{ leg.rotation.x=walking?Math.sin(time*11+i*Math.PI)*.5:0; });
+    arms[0].rotation.x=walking?Math.sin(time*11)*.5:0;
+    cape.rotation.x=-.15+Math.sin(time*5)*.035+(walking?.12:0);
+
+    let safe=false;
+    for(const p of safePoints) {
+      if(Math.hypot(nx-p.x,nz-p.z)<3){ safe=true; lastSafe=p; }
+    }
+
+    if(safe)state.charge=Math.min(100,state.charge+24*dt);
+    else if(state.reveal)state.charge=Math.max(0,state.charge-3.4*dt);
+    else state.charge=Math.min(100,state.charge+2*dt);
+
+    if(state.charge<=0&&state.reveal) {
+      const onBridge=nz < -8 && nz > -14;
+      if(onBridge) {
+        player.position.set(0,.35,-6.5);
+        velocity.set(0,0,0);
+        notify("A ponte se desfaz. A lanterna devolve você à margem.");
+      } else {
+        notify("A chama enfraqueceu. Recarregue junto a um poste dourado.");
+      }
+      state.reveal=false;
+    }
+
+    // Conchas de eco
+    if(state.reveal) {
+      for(const s of shells) {
+        if(!s.taken&&Math.hypot(player.position.x-s.x,player.position.z-s.z)<1.5) {
+          s.taken=true;
+          state.shells++;
+          state.charge=Math.min(100,state.charge+12);
+          notify("Concha de eco encontrada ("+state.shells+"/8). A lanterna se renova um pouco.",2500);
+          if(state.shells===1)entry("Conchas de eco","Fragmentos de memória solidificados. A lente do farol precisa de pelo menos seis.");
+        }
+      }
+    }
+
+    // Maré alta
+    if(state.spoke) {
+      if(!tide.warn) {
+        tide.t-=dt;
+        if(tide.t<=0){ tide.warn=9; notify("A MARÉ SOBE! Corra para um poste dourado!",3500); }
+      } else {
+        tide.warn-=dt;
+        if(tide.warn<=0) {
+          tide.warn=0;
+          tide.t=45+Math.random()*20;
+          if(!safe) {
+            state.charge=Math.max(0,state.charge-35);
+            state.reveal=false;
+            player.position.set(lastSafe.x,.35,lastSafe.z+1.2);
+            velocity.set(0,0,0);
+            notify("A onda levou você de volta ao último poste.");
+          } else notify("Você resistiu à maré.",2500);
+        }
+      }
+    }
+
+    // Afogados
+    const ex=player.position.x, ez=player.position.z;
+    for(const e of enemies) {
+      const g=e.g,z=e.zone;
+      const dx=ex-g.position.x,dz=ez-g.position.z,d=Math.hypot(dx,dz);
+      const inZ=ex>=z.x0&&ex<=z.x1&&ez>=z.z0&&ez<=z.z1;
+      const notice=state.reveal?e.n2:e.n1;
+      if(inZ&&!safe&&d<notice&&d>.01) {
+        const sp=state.reveal?e.s2:e.s1;
+        g.position.x+=dx/d*sp*dt;
+        g.position.z+=dz/d*sp*dt;
+        g.rotation.y=Math.atan2(-dx,-dz);
+      } else {
+        g.position.x+=Math.sin(time*.4+e.ph)*.45*dt;
+        g.position.z+=Math.cos(time*.3+e.ph)*.3*dt;
+      }
+      g.position.x=THREE.MathUtils.clamp(g.position.x,z.x0,z.x1);
+      g.position.z=THREE.MathUtils.clamp(g.position.z,z.z0,z.z1);
+      g.position.y=.3+Math.sin(time*2+e.ph)*.12;
+      if(d<1.2*e.sc&&inZ&&!safe&&hitCooldown<=0)catchPlayer();
+    }
+
+    findInteraction();
+  }
+
+  function drawMap() {
+    const ctx=$("map").getContext("2d");
+    ctx.clearRect(0,0,200,200);
+    const X=x=>14+(x+49)*1.2, Z=z=>82+z*1.05;
+
+    ctx.fillStyle="#47616a88";
+    ctx.fillRect(X(-49),Z(-78),X(49)-X(-49),Z(-14)-Z(-78));
+    ctx.fillRect(X(-49),Z(-8),X(49)-X(-49),Z(30)-Z(-8));
+    ctx.fillRect(X(59),Z(-44),X(93)-X(59),Z(-16)-Z(-44));
+    ctx.fillStyle="#6a5f55";
+    ctx.fillRect(X(49),Z(-26),X(59)-X(49),Z(-22)-Z(-26)); 
+    ctx.fillStyle=state.reveal?"#8edcd6":"#394b61";
+    ctx.fillRect(X(-3),Z(-14),X(3)-X(-3),Z(-8)-Z(-14));
+
+    function dot(x,z,color,r) {
+      ctx.fillStyle=color;
+      ctx.beginPath();
+      ctx.arc(X(x),Z(z),r,0,Math.PI*2);
+      ctx.fill();
+    }
+    dot(-12,4,"#f0cf91",4);
+    dot(14,1,"#e9d4b1",4);
+    dot(-8,-20,"#8ce7dd",4);
+    dot(-20,-32,"#8ce7dd",3.5);
+    dot(20,-32,"#e5c278",3.5);
+    dot(76,-36,"#8ce7dd",3.5);
+    dot(0,-58,"#8ce7dd",3.5);
+    dot(0,-24,"#f7dc9b",5);
+    if(state.reveal) shells.forEach(s=>{ if(!s.taken)dot(s.x,s.z,"#9ffff2",2); });
+    enemies.forEach(e=>dot(e.g.position.x,e.g.position.z,"#ce7782",3));
+    dot(player.position.x,player.position.z,"#ffffff",3.5);
+    ctx.font="10px Georgia";
+    ctx.fillStyle="#d5e0dd";
+    ctx.fillText("N",96,10);
+  }
+
+  function render(dt) {
+    past.visible=state.reveal;
+    ghosts.visible=state.reveal;
+    scene.fog.color.setHex(tide.warn>0?0x3a2a3a:(state.reveal?0x24424d:0x172e42));
+    playerLight.color.setHex(state.reveal?0x87eee1:0xffd49c);
+    playerLight.intensity=state.reveal?3:2.2;
+    lampMat.color.setHex(state.reveal?0x87eee1:0xffd49c);
+
+    shells.forEach(s=>{
+      s.m.visible=state.reveal&&!s.taken;
+      s.m.rotation.y=time*2;
+      s.m.position.y=1.1+Math.sin(time*2+s.x)*.15;
+    });
+    orbs.forEach(o=>{
+      o.position.y=o.userData.b+Math.sin(time+o.userData.p)*.5;
+      o.scale.setScalar(state.reveal?1.8:1);
+    });
+    ghosts.children.forEach((g,i)=>{ g.position.y=.4+Math.sin(time*1.5+i)*.2; });
+    boats.forEach(b=>{
+      b.g.position.y=-.2+Math.sin(time*1.2+b.p)*.08;
+      b.g.rotation.z=Math.sin(time+b.p)*.03;
+    });
+    beamPivot.rotation.y=time*.5;
+    braziers.forEach(b=>{
+      b.f.material.emissiveIntensity=b.lit?1.4+Math.sin(time*12)*.3:.05;
+      b.l.intensity=b.lit?1.6:0;
+    });
+
+    $("charge").style.width=state.charge+"%";
+    $("stam").style.width=state.stamina+"%";
+    $("mode").textContent="Lanterna: "+(state.reveal?"passado":"presente")+
+      " · "+Math.round(state.charge)+"% · Conchas "+state.shells+"/8"+
+      (state.tired?" · SEM FÔLEGO":"");
+    $("task").textContent=objective();
+    $("tide").textContent=tide.warn>0?"MARÉ ALTA · "+Math.ceil(tide.warn)+"s · corra a um poste dourado":"";
+
+    const target=player.position;
+    cameraTarget.set(target.x,target.y+12.5,target.z+16.5);
+    camera.position.lerp(cameraTarget,1-Math.exp(-5*dt));
+    camera.lookAt(target.x,1,target.z-2.5);
+
+    water.material.color.setHSL(.56,.5,.135+Math.sin(time*.4)*.008);
+    water.position.y=-.6+Math.sin(time*.8)*.03;
+    drawMap();
+    renderer.render(scene,camera);
+  }
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt=Math.min((now-last)/1000,.04);
+    last=now;
+    if(state.started&&!state.paused&&!state.ended&&!dialogOpen&&!journalOpen) update(dt);
+    render(dt);
+  }
+
+  addEventListener("keydown",event=>{
+    if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].includes(event.code)) event.preventDefault();
+    keys[event.code]=true;
+    if(event.repeat)return;
+
+    if(dialogOpen&&/^Digit[1-4]$/.test(event.code)) {
+      const index=Number(event.code.slice(-1))-1;
+      const option=currentChoices[index];
+      if(option){ closeDialogue(); option.action(); }
+      return;
+    }
+
+    if(event.code==="KeyF")toggleLantern();
+    if(event.code==="KeyE")interact();
+    if(event.code==="KeyJ")openJournal();
+
+    if(event.code==="KeyP"&&state.started&&!state.ended) {
+      state.paused=!state.paused;
+      notify(state.paused?"Pausado. Pressione P para continuar.":"A cidade volta a respirar.");
+    }
+  });
+
+  addEventListener("keyup",event=>keys[event.code]=false);
+  addEventListener("blur",()=>{ Object.keys(keys).forEach(key=>keys[key]=false); });
+  addEventListener("resize",()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));
+    renderer.setSize(innerWidth,innerHeight);
+  });
+
+  $("loading").textContent="Cidade pronta. Use teclado e navegador com WebGL.";
+  $("start").disabled=false;
+  $("start").onclick=()=>{
+    state.started=true;
+    $("menu").classList.add("hidden");
+    notify("Procure a barqueira no mercado à esquerda. Os postes dourados restauram sua luz.");
+  };
+
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
+
+eu amo bolacha com suco e brigadeiro e pipoca 
